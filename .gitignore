@@ -2,11 +2,6 @@ scratchpad/build/
 apps/node-build/
 node_modules/
 coverage/
-ts3.4/
-build/
-dist/
-cjs/
-es/
 samples/
 
 tsBuildInfo.json
