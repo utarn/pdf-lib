@@ -99,6 +99,7 @@ Install with: `npm install @cantoo/pdf-lib`
 
 - Create new PDFs
 - Modify existing PDFs
+- Incremental save (append changes without rewriting entire PDF)
 - Create forms
 - Fill forms
 - Flatten forms
@@ -1272,6 +1273,8 @@ API documentation is available on the project site at https://pdf-lib.js.org/doc
 
 The repo for the project site (and generated documentation files) is
 located here: https://github.com/Hopding/pdf-lib-docs.
+
+For detailed information about the incremental save feature, see [docs/incremental-save.md](docs/incremental-save.md).
 
 ## Fonts and Unicode
 

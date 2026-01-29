@@ -1,5 +1,6 @@
 import { EmbeddedFileOptions } from '../core/embedders/FileEmbedder';
 import { TypeFeatures } from '../types/fontkit';
+import { DocumentSnapshot } from './snapshot';
 
 export enum ParseSpeeds {
   Fastest = Infinity,
@@ -43,4 +44,8 @@ export interface EmbedFontOptions {
 
 export interface SetTitleOptions {
   showInWindowTitleBar: boolean;
+}
+
+export interface IncrementalSaveOptions extends SaveOptions {
+  snapshot?: DocumentSnapshot;
 }

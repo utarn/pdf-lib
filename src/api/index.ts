@@ -11,6 +11,7 @@ export * from './sizes';
 export * from './PDFPageOptions';
 export * from './PDFDocumentOptions';
 export * from './StandardFonts';
+export * from './snapshot';
 export { default as PDFDocument } from './PDFDocument';
 export { default as PDFFont } from './PDFFont';
 export { default as PDFImage } from './PDFImage';

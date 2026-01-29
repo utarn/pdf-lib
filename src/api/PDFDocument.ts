@@ -53,7 +53,9 @@ import {
   CreateOptions,
   EmbedFontOptions,
   SetTitleOptions,
+  IncrementalSaveOptions,
 } from './PDFDocumentOptions';
+import { DocumentSnapshot, IncrementalDocumentSnapshot } from './snapshot';
 import PDFObject from '../core/objects/PDFObject';
 import PDFRef from '../core/objects/PDFRef';
 import { Fontkit } from '../types/fontkit';
@@ -203,9 +205,15 @@ export default class PDFDocument {
           password,
         ),
       ).parseDocument();
-      return new PDFDocument(decryptedContext, true, updateMetadata);
+      const doc = new PDFDocument(decryptedContext, true, updateMetadata);
+      // Store original bytes for incremental saves
+      doc.originalBytes = bytes.slice();
+      return doc;
     } else {
-      return new PDFDocument(context, ignoreEncryption, updateMetadata);
+      const doc = new PDFDocument(context, ignoreEncryption, updateMetadata);
+      // Store original bytes for incremental saves
+      doc.originalBytes = bytes.slice();
+      return doc;
     }
   }
 
@@ -247,6 +255,9 @@ export default class PDFDocument {
   private readonly embeddedPages: PDFEmbeddedPage[];
   private readonly embeddedFiles: PDFEmbeddedFile[];
   private readonly javaScripts: PDFJavaScript[];
+
+  /** Original bytes of the loaded PDF document, used for incremental saves */
+  private originalBytes?: Uint8Array;
 
   private constructor(
     context: PDFContext,
@@ -1509,6 +1520,118 @@ export default class PDFDocument {
 
   encrypt(options: SecurityOptions) {
     this.context.security = PDFSecurity.create(this.context, options).encrypt();
+  }
+
+  /**
+   * Take a snapshot of the current document state. This snapshot can be used
+   * later to perform incremental saves that only include changes made after
+   * the snapshot was taken.
+   *
+   * For example:
+   * ```js
+   * const pdfDoc = await PDFDocument.load(existingPdfBytes)
+   *
+   * // Take a snapshot before making changes
+   * const snapshot = await pdfDoc.takeSnapshot()
+   *
+   * // Make some changes
+   * const page = pdfDoc.addPage()
+   * page.drawText('Hello World!')
+   *
+   * // Save only the changes
+   * const incrementalBytes = await pdfDoc.saveIncremental({ snapshot })
+   * ```
+   *
+   * @returns A snapshot of the document's current state
+   */
+  async takeSnapshot(): Promise<DocumentSnapshot> {
+    await this.flush();
+
+    // Use original bytes if available (for loaded documents),
+    // otherwise fall back to save() (for newly created documents)
+    const savedBytes = this.originalBytes
+      ? this.originalBytes
+      : await this.save();
+    const existingRefs = this.context
+      .enumerateIndirectObjects()
+      .map(([ref]) => ref);
+
+    return IncrementalDocumentSnapshot.fromDocument(savedBytes, existingRefs);
+  }
+
+  /**
+   * Save the document incrementally, appending only the changes since the
+   * provided snapshot was taken. This is more efficient than a full save
+   * when only small changes have been made to a large document.
+   *
+   * The result is the original document bytes concatenated with the
+   * incremental update section, forming a valid PDF with an incremental
+   * update structure.
+   *
+   * For example:
+   * ```js
+   * const pdfDoc = await PDFDocument.load(existingPdfBytes)
+   * const snapshot = await pdfDoc.takeSnapshot()
+   *
+   * // Make changes
+   * const pages = pdfDoc.getPages()
+   * const firstPage = pages[0]
+   * firstPage.drawText('Modified!')
+   *
+   * // Save incrementally
+   * const incrementalBytes = await pdfDoc.saveIncremental({ snapshot })
+   * ```
+   *
+   * @param options The options to be used when saving incrementally
+   * @returns Resolves with the bytes of the complete document (original + incremental update)
+   */
+  async saveIncremental(
+    options: IncrementalSaveOptions = {},
+  ): Promise<Uint8Array> {
+    const {
+      snapshot,
+      useObjectStreams = true,
+      addDefaultPage = true,
+      objectsPerTick = 50,
+      updateFieldAppearances = true,
+    } = options;
+
+    assertIs(useObjectStreams, 'useObjectStreams', ['boolean']);
+    assertIs(addDefaultPage, 'addDefaultPage', ['boolean']);
+    assertIs(objectsPerTick, 'objectsPerTick', ['number']);
+    assertIs(updateFieldAppearances, 'updateFieldAppearances', ['boolean']);
+
+    if (!snapshot) {
+      throw new Error('snapshot is required for incremental save');
+    }
+
+    if (addDefaultPage && this.getPageCount() === 0) this.addPage();
+
+    if (updateFieldAppearances) {
+      const form = this.formCache.getValue();
+      if (form) form.updateFieldAppearances();
+    }
+
+    await this.flush();
+
+    const Writer = useObjectStreams ? PDFStreamWriter : PDFWriter;
+    const incrementalBytes = await Writer.forContext(
+      this.context,
+      objectsPerTick,
+    ).serializeToBufferIncremental(snapshot);
+
+    // Concatenate original bytes with incremental update
+    const originalBytesFromSnapshot = snapshot.getOriginalBytes();
+    const completeBytes = new Uint8Array(
+      originalBytesFromSnapshot.length + incrementalBytes.length,
+    );
+    completeBytes.set(originalBytesFromSnapshot, 0);
+    completeBytes.set(incrementalBytes, originalBytesFromSnapshot.length);
+
+    // Update originalBytes for subsequent incremental saves
+    this.originalBytes = completeBytes.slice();
+
+    return completeBytes;
   }
 
   /**
